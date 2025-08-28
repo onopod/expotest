@@ -27,11 +27,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Authenticate with Expo
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           echo "Authenticating with Expo token..."
-          eas login --token $EXPO_TOKEN
+          eas login --token ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
         run: npm ci
