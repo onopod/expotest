@@ -30,12 +30,8 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          if eas whoami > /dev/null 2>&1; then
-            echo "Already authenticated with Expo"
-          else
-            echo "Authenticating with Expo token..."
-            eas login --token $EXPO_TOKEN
-          fi
+          echo "Authenticating with Expo token..."
+          eas login --token $EXPO_TOKEN
 
       - name: Install dependencies
         run: npm ci
@@ -81,13 +77,15 @@ jobs:
       - name: Download build artifact
         run: |
           echo "Downloading Android build..."
-          eas build:download --platform android --profile production --build-id ${{ env.BUILD_ID }} --output ./app.aab
+          eas build:download --build-id ${{ env.BUILD_ID }} --output ./app.aab
           echo "Build artifact downloaded successfully"
 
       - name: Submit to Google Play
         run: |
           echo "Submitting to Google Play..."
-          echo "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY }}" > ./service-account-key.json
+          set +x
+          printf "%s" "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY }}" > ./service-account-key.json
+          set -x
           eas submit -p android \
             --profile production \
             --path ./app.aab \
