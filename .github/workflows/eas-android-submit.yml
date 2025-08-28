@@ -1,0 +1,68 @@
+name: EAS Android Submit
+
+# mainブランチへのpushで自動実行
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-submit-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Authenticate with Expo
+        run: |
+          if eas whoami > /dev/null 2>&1; then
+            echo "Already authenticated with Expo"
+          else
+            echo "Authenticating with Expo token..."
+            eas login --token ${{ secrets.EXPO_TOKEN }}
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android App
+        run: |
+          echo "Starting Android build..."
+          eas build --platform android --profile production --non-interactive
+
+      - name: Download build artifact
+        run: |
+          echo "Downloading latest Android build..."
+          # 最新のビルドを取得
+          BUILD_ID=$(eas build:list --platform android --profile production --json | jq -r '.[0].id')
+          if [ "$BUILD_ID" = "null" ] || [ -z "$BUILD_ID" ]; then
+            echo "No build found, exiting..."
+            exit 1
+          fi
+          echo "Build ID: $BUILD_ID"
+          eas build:download --platform android --profile production --build-id $BUILD_ID --output ./app.aab
+
+      - name: Submit to Google Play
+        run: |
+          echo "Submitting to Google Play..."
+          eas submit -p android \
+            --profile production \
+            --path ./app.aab \
+            --non-interactive \
+            --service-account-key ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up artifacts..."
+          rm -f ./app.aab
