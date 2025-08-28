@@ -23,13 +23,18 @@ jobs:
       - name: Install EAS CLI
         run: npm install -g eas-cli
 
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: Authenticate with Expo
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           if eas whoami > /dev/null 2>&1; then
             echo "Already authenticated with Expo"
           else
             echo "Authenticating with Expo token..."
-            eas login --token ${{ secrets.EXPO_TOKEN }}
+            eas login --token $EXPO_TOKEN
           fi
 
       - name: Install dependencies
@@ -38,31 +43,59 @@ jobs:
       - name: Build Android App
         run: |
           echo "Starting Android build..."
-          eas build --platform android --profile production --non-interactive
+          BUILD_OUTPUT=$(eas build --platform android --profile production --non-interactive --json)
+          BUILD_ID=$(echo $BUILD_OUTPUT | jq -r '.builds[0].id')
+          echo "Build ID: $BUILD_ID"
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
+
+      - name: Wait for build completion
+        run: |
+          echo "Waiting for build completion..."
+          MAX_ATTEMPTS=30
+          ATTEMPT=1
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Checking build status (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+            BUILD_STATUS=$(eas build:status --build-id ${{ env.BUILD_ID }} --json | jq -r '.status')
+
+            echo "Build status: $BUILD_STATUS"
+
+            if [ "$BUILD_STATUS" = "finished" ]; then
+              echo "Build completed successfully!"
+              break
+            elif [ "$BUILD_STATUS" = "errored" ] || [ "$BUILD_STATUS" = "canceled" ]; then
+              echo "Build failed with status: $BUILD_STATUS"
+              exit 1
+            fi
+
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "Build did not complete within expected time"
+              exit 1
+            fi
+
+            echo "Waiting 30 seconds before next check..."
+            sleep 30
+            ATTEMPT=$((ATTEMPT + 1))
+          done
 
       - name: Download build artifact
         run: |
-          echo "Downloading latest Android build..."
-          # 最新のビルドを取得
-          BUILD_ID=$(eas build:list --platform android --profile production --json | jq -r '.[0].id')
-          if [ "$BUILD_ID" = "null" ] || [ -z "$BUILD_ID" ]; then
-            echo "No build found, exiting..."
-            exit 1
-          fi
-          echo "Build ID: $BUILD_ID"
-          eas build:download --platform android --profile production --build-id $BUILD_ID --output ./app.aab
+          echo "Downloading Android build..."
+          eas build:download --platform android --profile production --build-id ${{ env.BUILD_ID }} --output ./app.aab
+          echo "Build artifact downloaded successfully"
 
       - name: Submit to Google Play
         run: |
           echo "Submitting to Google Play..."
+          echo "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY }}" > ./service-account-key.json
           eas submit -p android \
             --profile production \
             --path ./app.aab \
             --non-interactive \
-            --service-account-key ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY }}
+            --service-account-key-path ./service-account-key.json
 
       - name: Cleanup
         if: always()
         run: |
           echo "Cleaning up artifacts..."
-          rm -f ./app.aab
+          rm -f ./app.aab ./service-account-key.json
